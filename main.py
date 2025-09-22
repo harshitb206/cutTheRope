@@ -33,7 +33,7 @@ HEIGHT = 480
 ball_radius = 18
 gravity = 4.0
 
-# reduce CPU by processing hands every N frames (tweak if needed)
+# reduce CPU by processing hands every N frames
 frame_skip = 2
 
 # --- High score ---
@@ -58,7 +58,6 @@ def point_line_distance(px, py, x1, y1, x2, y2):
     return num / den
 
 def segment_intersect(a1, a2, b1, b2):
-    # check if segments a1-a2 and b1-b2 intersect (excluding collinear edge cases)
     def orient(p, q, r):
         return (q[1]-p[1])*(r[0]-q[0]) - (q[0]-p[0])*(r[1]-q[1])
     p1, p2, p3, p4 = a1, a2, b1, b2
@@ -67,7 +66,6 @@ def segment_intersect(a1, a2, b1, b2):
     o3 = orient(p3,p4,p1)
     o4 = orient(p3,p4,p2)
     if o1==0 and o2==0 and o3==0 and o4==0:
-        # collinear - fallback to bounding-box check
         def on_seg(p,q,r):
             return min(p[0],r[0]) <= q[0] <= max(p[0],r[0]) and min(p[1],r[1]) <= q[1] <= max(p[1],r[1])
         return on_seg(p1,p3,p2) or on_seg(p1,p4,p2) or on_seg(p3,p1,p4) or on_seg(p3,p2,p4)
@@ -75,7 +73,6 @@ def segment_intersect(a1, a2, b1, b2):
 
 def generate_obstacles(num):
     obs = []
-    # ensure obstacles spawn in middle area (not near top where face usually is)
     min_y = 180
     max_y = HEIGHT - 200
     if max_y <= min_y:
@@ -110,7 +107,6 @@ def is_pinch(landmarks, w, h, thresh=0.05):
 
 # --- Menus ---
 def start_menu():
-    """Displays start menu. Waits for user to 'press' Start via pinch on Start button."""
     start_rect = (WIDTH//2 - 120, HEIGHT//2 - 40, 240, 60)
     while True:
         ret, frame = cap.read()
@@ -131,13 +127,10 @@ def start_menu():
             cv2.circle(frame, (finger_x, finger_y), 7, (0,255,0), -1)
             pinched = is_pinch(lm, w, h, thresh=0.045)
 
-        # Draw title & instruction
         cv2.putText(frame, "Cut the Rope - Hand Game", (80, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,255,255), 2)
         cv2.putText(frame, "Hover index on START and pinch to begin", (40, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200,200,200), 1)
-        # Draw high score
         cv2.putText(frame, f"HighScore: {high_score}", (WIDTH-200, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,200,255), 2)
 
-        # Button hover detection
         hovered = False
         if finger_x and finger_y:
             x,y,wid,ht = start_rect
@@ -149,13 +142,12 @@ def start_menu():
                     return True
 
         draw_button(frame, start_rect, "START", hovered)
-        cv2.imshow("Cut the Rope - Start Menu", frame)
+        cv2.imshow("Cut the Rope", frame)
         key = cv2.waitKey(1) & 0xFF
         if key == 27:
             return False
 
 def game_over_menu(final_score):
-    """Displays game over screen with Restart and Quit buttons. Hand-controlled via hover+pinch."""
     restart_rect = (WIDTH//2 - 260, HEIGHT//2 + 40, 220, 60)
     quit_rect = (WIDTH//2 + 40, HEIGHT//2 + 40, 220, 60)
     global high_score
@@ -178,12 +170,10 @@ def game_over_menu(final_score):
             cv2.circle(frame, (finger_x, finger_y), 7, (0,255,0), -1)
             pinched = is_pinch(lm, w, h, thresh=0.045)
 
-        # Draw game over text
         cv2.putText(frame, "GAME OVER", (WIDTH//2 - 120, HEIGHT//2 - 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0,0,255), 3)
         cv2.putText(frame, f"Score: {final_score}", (WIDTH//2 - 90, HEIGHT//2), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
         cv2.putText(frame, f"HighScore: {high_score}", (WIDTH//2 - 90, HEIGHT//2 + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,200,255), 2)
 
-        # Hover detection and activation
         restart_hover = False; quit_hover = False
         if finger_x and finger_y:
             rx,ry,rw,rh = restart_rect
@@ -202,7 +192,7 @@ def game_over_menu(final_score):
         draw_button(frame, restart_rect, "RESTART", restart_hover)
         draw_button(frame, quit_rect, "QUIT", quit_hover)
 
-        cv2.imshow("Cut the Rope - Game Over", frame)
+        cv2.imshow("Cut the Rope", frame)
         key = cv2.waitKey(1) & 0xFF
         if key == 27:
             return "quit"
@@ -210,7 +200,6 @@ def game_over_menu(final_score):
 # --- Core Game Loop ---
 def game_loop():
     global high_score
-    # Game params
     score = 0
     lives = 3
     level = 1
@@ -223,9 +212,9 @@ def game_loop():
     fall_velocity = 0.0
     last_cut_time = 0
 
-    basket_w, basket_h = 160, 60   # wider basket
+    basket_w, basket_h = 160, 60
     basket_x = random.randint(60, WIDTH - basket_w - 60)
-    basket_y = HEIGHT - 120        # lift basket a bit from bottom to show bowl
+    basket_y = HEIGHT - 120
 
     obstacles = generate_obstacles(1)
     ball_x, ball_y = pendulum_pos(rope_anchor, rope_length, angle)
@@ -242,7 +231,6 @@ def game_loop():
         h, w, _ = frame.shape
 
         finger_x = None; finger_y = None; pinched = False
-        # process hands every frame_skip frames for performance
         if frame_count % frame_skip == 0:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             res = hands.process(rgb)
@@ -256,23 +244,18 @@ def game_loop():
             else:
                 lm = None
         else:
-            # still draw hand landmarks if available (less frequent), but we don't re-process
             lm = None
         frame_count += 1
 
-        # Draw obstacles and basket, HUD
         for (ox,oy,ow,oh) in obstacles:
             cv2.rectangle(frame, (ox,oy), (ox+ow, oy+oh), (0,0,255), -1)
 
-        # Draw bowl-like basket using filled ellipse on a mask for accurate collision
         bowl_mask = np.zeros((HEIGHT, WIDTH), dtype=np.uint8)
         cx = basket_x + basket_w//2
-        cy = basket_y + basket_h   # center is below top so ellipse resembles a bowl
+        cy = basket_y + basket_h
         axes = (basket_w//2, basket_h)
-        cv2.ellipse(bowl_mask, (cx, cy), axes, 0, 0, 180, 255, -1)  # top half (0..180)
-        # draw the same ellipse on frame (outline + rim)
+        cv2.ellipse(bowl_mask, (cx, cy), axes, 0, 0, 180, 255, -1)
         cv2.ellipse(frame, (cx, cy), axes, 0, 0, 180, (0,255,200), 2)
-        # fill little shadow under rim to make bowl visible
         cv2.ellipse(frame, (cx, cy), (axes[0]-6, axes[1]-6), 0, 0, 180, (20,100,60), -1)
 
         cv2.putText(frame, f"Lives: {lives}", (10,25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
@@ -280,7 +263,6 @@ def game_loop():
         cv2.putText(frame, f"Level: {level}", (10,85), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200,200,200), 2)
         cv2.putText(frame, f"HighScore: {high_score}", (WIDTH-240, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,200,255), 2)
 
-        # Physics
         if not cut:
             angle += angular_velocity * (1 + (level-1)*0.08)
             ball_x, ball_y = pendulum_pos(rope_anchor, rope_length, angle)
@@ -293,15 +275,12 @@ def game_loop():
         cv2.circle(frame, (ball_x, ball_y), ball_radius, (0,0,255), -1)
         cv2.circle(frame, rope_anchor, 4, (255,255,255), -1)
 
-        # Cutting detection (requires crossing with previous finger position)
         if not cut and prev_finger is not None and finger_x is not None:
-            # require a minimum finger movement to avoid jitter-based cuts
             dx = finger_x - prev_finger[0]
             dy = finger_y - prev_finger[1]
             move_dist = math.hypot(dx, dy)
-            min_swipe = 12  # tweak: minimum pixels moved to consider a swipe
+            min_swipe = 12
             if move_dist > min_swipe:
-                # check if movement segment intersects the rope segment
                 a1 = (prev_finger[0], prev_finger[1])
                 a2 = (finger_x, finger_y)
                 b1 = rope_anchor
@@ -312,11 +291,9 @@ def game_loop():
                     last_cut_time = time.time()
                     if cut_sound: cut_sound.play()
 
-        # update prev_finger only when finger is detected
         if finger_x is not None:
             prev_finger = (finger_x, finger_y)
 
-        # Check obstacle collision
         cracked = False
         for (ox,oy,ow,oh) in obstacles:
             if (ox < ball_x < ox+ow) and (oy < ball_y+ball_radius < oy+oh):
@@ -326,7 +303,7 @@ def game_loop():
 
         if cracked:
             cv2.putText(frame, "Ouch!", (WIDTH//2 - 40, HEIGHT//2), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0,0,255), 3)
-            cv2.imshow("Cut the Rope - Playing", frame)
+            cv2.imshow("Cut the Rope", frame)
             cv2.waitKey(200)
             rope_anchor = (random.randint(120, WIDTH-120), 60)
             angle = math.pi/4
@@ -338,15 +315,12 @@ def game_loop():
             if lives <= 0:
                 return "gameover", score
 
-        # Check catch using bowl_mask (point inside ellipse)
         if cut:
-            # ensure coordinates within frame bounds
             bx = int(ball_x); by = int(ball_y + ball_radius//2)
             if 0 <= bx < WIDTH and 0 <= by < HEIGHT:
                 if bowl_mask[by, bx] > 0:
                     score += 1
                     if catch_sound: catch_sound.play()
-                    # Update high score
                     if score > high_score:
                         high_score = score
                         try:
@@ -356,7 +330,6 @@ def game_loop():
                             pass
                     if score % 3 == 0:
                         level += 1
-                    # Reset round
                     rope_anchor = (random.randint(120, WIDTH-120), 60)
                     angle = math.pi/4
                     cut = False
@@ -365,7 +338,6 @@ def game_loop():
                     basket_x = random.randint(60, WIDTH - basket_w - 60)
                     obstacles = generate_obstacles(max(1, level//2))
 
-        # Ball falls off bottom
         if ball_y - ball_radius > HEIGHT:
             lives -= 1
             rope_anchor = (random.randint(120, WIDTH-120), 60)
@@ -379,13 +351,13 @@ def game_loop():
             if lives <= 0:
                 return "gameover", score
 
-        # Show frame
-        cv2.imshow("Cut the Rope - Playing", frame)
+        cv2.imshow("Cut the Rope", frame)
         key = cv2.waitKey(1) & 0xFF
         if key == 27:
             return "quit", score
 
-# --- Main flow ---
+# --- Main Flow ---
+cv2.namedWindow("Cut the Rope", cv2.WINDOW_NORMAL)  # persistent window
 try:
     while True:
         start = start_menu()
