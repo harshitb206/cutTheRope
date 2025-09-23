@@ -5,11 +5,21 @@ import random, math, os, time
 import pygame
 
 # --- Setup paths & sounds ---
-pygame.mixer.init()
+try:
+    pygame.mixer.init()
+except Exception as e:
+    print("Warning: pygame.mixer init failed:", e)
+
 base_dir = os.path.dirname(__file__)
+if base_dir == "":
+    base_dir = "."
+
 def load_sound(name):
     try:
-        return pygame.mixer.Sound(os.path.join(base_dir, name))
+        path = os.path.join(base_dir, name)
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+        return pygame.mixer.Sound(path)
     except Exception as e:
         print(f"Sound load failed ({name}):", e)
         return None
@@ -27,11 +37,15 @@ cap = cv2.VideoCapture(0)
 if not cap.isOpened():
     raise RuntimeError("Could not open webcam.")
 
+# Optionally set desired resolution
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
 # --- Game constants ---
 WIDTH = 640
 HEIGHT = 480
 ball_radius = 18
-gravity = 4.0
+gravity = 3.0
 
 # reduce CPU by processing hands every N frames
 frame_skip = 2
@@ -58,18 +72,37 @@ def point_line_distance(px, py, x1, y1, x2, y2):
     return num / den
 
 def segment_intersect(a1, a2, b1, b2):
+    # Robust segment intersection using orientations
     def orient(p, q, r):
-        return (q[1]-p[1])*(r[0]-q[0]) - (q[0]-p[0])*(r[1]-q[1])
+        # cross product (q - p) x (r - p)
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+
+    def on_seg(p, q, r):
+        # check if point q lies on segment pr
+        return (min(p[0], r[0]) <= q[0] <= max(p[0], r[0]) and
+                min(p[1], r[1]) <= q[1] <= max(p[1], r[1]))
+
     p1, p2, p3, p4 = a1, a2, b1, b2
-    o1 = orient(p1,p2,p3)
-    o2 = orient(p1,p2,p4)
-    o3 = orient(p3,p4,p1)
-    o4 = orient(p3,p4,p2)
-    if o1==0 and o2==0 and o3==0 and o4==0:
-        def on_seg(p,q,r):
-            return min(p[0],r[0]) <= q[0] <= max(p[0],r[0]) and min(p[1],r[1]) <= q[1] <= max(p[1],r[1])
-        return on_seg(p1,p3,p2) or on_seg(p1,p4,p2) or on_seg(p3,p1,p4) or on_seg(p3,p2,p4)
-    return (o1*o2 < 0) and (o3*o4 < 0)
+    o1 = orient(p1, p2, p3)
+    o2 = orient(p1, p2, p4)
+    o3 = orient(p3, p4, p1)
+    o4 = orient(p3, p4, p2)
+
+    # General case
+    if (o1 > 0 and o2 < 0 or o1 < 0 and o2 > 0) and (o3 > 0 and o4 < 0 or o3 < 0 and o4 > 0):
+        return True
+
+    # Special Cases: collinear and overlapping
+    if o1 == 0 and on_seg(p1, p3, p2):
+        return True
+    if o2 == 0 and on_seg(p1, p4, p2):
+        return True
+    if o3 == 0 and on_seg(p3, p1, p4):
+        return True
+    if o4 == 0 and on_seg(p3, p2, p4):
+        return True
+
+    return False
 
 def generate_obstacles(num):
     obs = []
@@ -102,7 +135,7 @@ def is_pinch(landmarks, w, h, thresh=0.05):
         y2 = landmarks.landmark[4].y * h
         d = math.hypot(x2-x1, y2-y1)
         return d < (thresh * w)
-    except:
+    except Exception:
         return False
 
 # --- Menus ---
@@ -132,7 +165,7 @@ def start_menu():
         cv2.putText(frame, f"HighScore: {high_score}", (WIDTH-200, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,200,255), 2)
 
         hovered = False
-        if finger_x and finger_y:
+        if finger_x is not None and finger_y is not None:
             x,y,wid,ht = start_rect
             if x < finger_x < x+wid and y < finger_y < y+ht:
                 hovered = True
@@ -146,6 +179,7 @@ def start_menu():
         key = cv2.waitKey(1) & 0xFF
         if key == 27:
             return False
+
 
 def game_over_menu(final_score):
     restart_rect = (WIDTH//2 - 260, HEIGHT//2 + 40, 220, 60)
@@ -175,7 +209,7 @@ def game_over_menu(final_score):
         cv2.putText(frame, f"HighScore: {high_score}", (WIDTH//2 - 90, HEIGHT//2 + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,200,255), 2)
 
         restart_hover = False; quit_hover = False
-        if finger_x and finger_y:
+        if finger_x is not None and finger_y is not None:
             rx,ry,rw,rh = restart_rect
             qx,qy,qw,qh = quit_rect
             if rx < finger_x < rx+rw and ry < finger_y < ry+rh:
@@ -213,7 +247,9 @@ def game_loop():
     last_cut_time = 0
 
     basket_w, basket_h = 160, 60
-    basket_x = random.randint(60, WIDTH - basket_w - 60)
+
+    # --- FIXED: Basket spawns below rope anchor ---
+    basket_x = max(60, min(WIDTH - basket_w - 60, rope_anchor[0] - basket_w // 2 + random.randint(-40, 40)))
     basket_y = HEIGHT - 120
 
     obstacles = generate_obstacles(1)
@@ -231,6 +267,7 @@ def game_loop():
         h, w, _ = frame.shape
 
         finger_x = None; finger_y = None; pinched = False
+        lm = None
         if frame_count % frame_skip == 0:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             res = hands.process(rgb)
@@ -241,10 +278,6 @@ def game_loop():
                 finger_y = int(lm.landmark[8].y * h)
                 cv2.circle(frame, (finger_x, finger_y), 7, (0,255,0), -1)
                 pinched = is_pinch(lm, w, h, thresh=0.045)
-            else:
-                lm = None
-        else:
-            lm = None
         frame_count += 1
 
         for (ox,oy,ow,oh) in obstacles:
@@ -275,6 +308,7 @@ def game_loop():
         cv2.circle(frame, (ball_x, ball_y), ball_radius, (0,0,255), -1)
         cv2.circle(frame, rope_anchor, 4, (255,255,255), -1)
 
+        # Cutting logic: require previous finger to exist
         if not cut and prev_finger is not None and finger_x is not None:
             dx = finger_x - prev_finger[0]
             dy = finger_y - prev_finger[1]
@@ -289,9 +323,11 @@ def game_loop():
                     cut = True
                     fall_velocity = 0.0
                     last_cut_time = time.time()
-                    if cut_sound: cut_sound.play()
+                    if cut_sound:
+                        cut_sound.play()
 
-        if finger_x is not None:
+        # Update prev_finger when we have a detection
+        if finger_x is not None and finger_y is not None:
             prev_finger = (finger_x, finger_y)
 
         cracked = False
@@ -310,7 +346,9 @@ def game_loop():
             cut = False
             fall_velocity = 0.0
             ball_x, ball_y = pendulum_pos(rope_anchor, rope_length, angle)
-            basket_x = random.randint(60, WIDTH - basket_w - 60)
+
+            # --- FIXED basket spawn ---
+            basket_x = max(60, min(WIDTH - basket_w - 60, rope_anchor[0] - basket_w // 2 + random.randint(-40, 40)))
             obstacles = generate_obstacles(max(1, level//2))
             if lives <= 0:
                 return "gameover", score
@@ -320,7 +358,8 @@ def game_loop():
             if 0 <= bx < WIDTH and 0 <= by < HEIGHT:
                 if bowl_mask[by, bx] > 0:
                     score += 1
-                    if catch_sound: catch_sound.play()
+                    if catch_sound:
+                        catch_sound.play()
                     if score > high_score:
                         high_score = score
                         try:
@@ -335,7 +374,9 @@ def game_loop():
                     cut = False
                     fall_velocity = 0.0
                     ball_x, ball_y = pendulum_pos(rope_anchor, rope_length, angle)
-                    basket_x = random.randint(60, WIDTH - basket_w - 60)
+
+                    # --- FIXED basket spawn ---
+                    basket_x = max(60, min(WIDTH - basket_w - 60, rope_anchor[0] - basket_w // 2 + random.randint(-40, 40)))
                     obstacles = generate_obstacles(max(1, level//2))
 
         if ball_y - ball_radius > HEIGHT:
@@ -345,7 +386,9 @@ def game_loop():
             cut = False
             fall_velocity = 0.0
             ball_x, ball_y = pendulum_pos(rope_anchor, rope_length, angle)
-            basket_x = random.randint(60, WIDTH - basket_w - 60)
+
+            # --- FIXED basket spawn ---
+            basket_x = max(60, min(WIDTH - basket_w - 60, rope_anchor[0] - basket_w // 2 + random.randint(-40, 40)))
             obstacles = generate_obstacles(max(1, level//2))
             cv2.waitKey(150)
             if lives <= 0:
@@ -355,6 +398,7 @@ def game_loop():
         key = cv2.waitKey(1) & 0xFF
         if key == 27:
             return "quit", score
+
 
 # --- Main Flow ---
 cv2.namedWindow("Cut the Rope", cv2.WINDOW_NORMAL)  # persistent window
