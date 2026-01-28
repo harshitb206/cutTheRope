@@ -14,6 +14,8 @@ This project includes sounds, obstacles, lives, and scoring. It's minimal-GUI an
    ```
 3. Run:
    ```bash
+   incase no venv then(python -m venv venv)
+   venv\Scripts\activate
    python main.py
    ```
 
